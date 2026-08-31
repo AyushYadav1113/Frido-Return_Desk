@@ -12,19 +12,9 @@ Support agents can create return requests, review them, approve or reject them, 
 
 ---
 
-## Screenshots
+## Architecture Diagram
 
-### Dashboard
-
-![ReturnDesk Dashboard](docs/screenshots/dashboard.png)
-
-### Request Details
-
-![Request Details](docs/screenshots/request-details.png)
-
-### Create Request
-
-![Create Request](docs/screenshots/create-request.png)
+<img width="1536" height="1024" alt="ReturnDesk-ARC" src="https://github.com/user-attachments/assets/5c29d8da-c237-41c9-84c6-0f63d7a7e5c0" />
 
 ---
 
@@ -400,7 +390,7 @@ If more time was available, I would consider adding:
 
 ## Time Spent
 
-Approximately **X hours**.
+Approximately 4 Hours in Development and 30 Min in Deployment 
 
 ---
 
