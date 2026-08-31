@@ -964,7 +964,7 @@ The implementation prioritizes:
 
 # Project Architecture
 
-<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/11274893-5fcf-4394-85f2-c1af3c19c412" />
+<img width="1536" height="1024" alt="ReturnDesk-ARC" src="https://github.com/user-attachments/assets/7db9c2fa-0c96-41d1-be97-bd3a5e9bd503" />
 
 ---
 
