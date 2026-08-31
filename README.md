@@ -1,164 +1,134 @@
-# ReturnDesk
+# ReturnDesk — Support Portal
 
-A returns management desk for small online stores.
-
-ReturnDesk allows support agents to create, review, approve, reject, complete, and remove return requests while enforcing the complete request lifecycle and business rules on the server.
+ReturnDesk is a high-performance support desk portal designed for processing and managing product return requests. The system provides support agents with search, status filtering, metadata configuration, note timelines, and status flow control following strict backend business rules.
 
 ## Live Demo
 
-**Production:** `https://your-returndesk-app.vercel.app`
-
-**GitHub:** `https://github.com/your-username/returndesk`
+*Not deployed yet. The application is configured and ready for local development or Vercel + Neon deployment.*
 
 ---
 
-## Features
+## Technology Stack
 
-* Create return requests against orders
-* Automatically generated human-readable request references
-* Search by customer, order, or reference
-* Server-side filtering by status and return reason
-* Server-side sorting and pagination
-* View complete request details
-* Add immutable notes to requests
-* Edit requests before they are decided
-* Approve requests with Refund, Replacement, or Store Credit resolutions
-* Validate refund amounts
-* Reject requests
-* Complete approved requests
-* Soft-remove eligible requests without destroying database records
-* Responsive interface down to 375px
-* Loading, empty, success, and error states
-* Server-side enforcement of all business rules
-* Seed data containing 30+ requests
-* Automated tests for critical business rules
+* **Frontend**: Next.js 14 App Router, React 18, TypeScript, Tailwind CSS
+* **Backend API**: Next.js Route Handlers (Node.js)
+* **Database & ORM**: PostgreSQL, Prisma ORM
+* **Validation**: Zod (for request queries, request bodies, and database input sanitization)
+* **Testing**: Vitest (test suite covering all core business rule validation limits)
 
 ---
 
-## Tech Stack
+## Setup Instructions
 
-### Frontend
+Ensure you have **Node.js (v18+)** and a running **PostgreSQL** instance. Follow these steps to run ReturnDesk locally:
 
-* Next.js
-* React
-* TypeScript
-* Tailwind CSS
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/AyushYadav1113/Frido-Return_Desk.git
+   cd Frido-Return_Desk
+   ```
 
-### Backend
+2. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
 
-* Next.js Route Handlers
-* Node.js
-* Zod
+3. **Configure Environment Variables**:
+   Copy `.env.example` to `.env` and fill in your connection string:
+   ```bash
+   cp .env.example .env
+   ```
+   Example `.env` content:
+   ```text
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/returndesk?schema=public"
+   ```
 
-### Database
+4. **Initialize Database & Seed**:
+   Run Prisma migrations to create the schema, sequence, and indexes:
+   ```bash
+   npx prisma db push
+   ```
+   Execute the seeding script to insert 30 return requests:
+   ```bash
+   npm run db:seed
+   ```
 
-* PostgreSQL
-* Prisma ORM
-
-### Deployment
-
-* Vercel
-* Neon PostgreSQL
+5. **Start the Development Server**:
+   ```bash
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) in your browser to view the app.
 
 ---
 
-## Architecture
+## API Overview
 
-ReturnDesk uses a single Next.js application with API Route Handlers.
+### Endpoints
+
+| Method | Endpoint | Description |
+|:---|:---|:---|
+| **GET** | `/api/requests` | Fetch paginated requests matching filters, search, and sort order. |
+| **POST** | `/api/requests` | Create a new return request. Reference is generated server-side. |
+| **GET** | `/api/requests/:id` | Get details and notes for a specific request. |
+| **PATCH** | `/api/requests/:id` | Update metadata fields (locks automatically if decided). |
+| **DELETE** | `/api/requests/:id` | Soft-deletes a request by setting `removedAt = NOW()`. |
+| **POST** | `/api/requests/:id/status` | Transitions status and applies resolution details. |
+| **POST** | `/api/requests/:id/notes` | Appends a note logs to the request. |
+
+### Query Parameters for `GET /api/requests`
+
+* `search`: Search against customerName, customerEmail, customerPhone, orderNumber, reference.
+* `status`: Filter by status (`OPEN`, `IN_REVIEW`, `APPROVED`, `REJECTED`, `COMPLETED`).
+* `reason`: Filter by reason (`DAMAGED`, `WRONG_ITEM`, `SIZE_ISSUE`, `NOT_AS_DESCRIBED`, `CHANGED_MIND`).
+* `sortBy`: Sort field (`createdAt`, `updatedAt`, `customerName`, `orderNumber`, `status`, `reference`).
+* `sortOrder`: `asc` or `desc` (default: `desc`).
+* `page`: Page index (default: `1`).
+* `pageSize`: Records per page (default: `10`).
+
+---
+
+## Business Rules
+
+ReturnDesk implements 5 core business rules enforced on the server-side to guarantee integrity:
+
+1. **Status Flow Validation**:
+   Status transitions can only move in the following sequence:
+   * `OPEN` &rarr; `IN_REVIEW`
+   * `IN_REVIEW` &rarr; `APPROVED` or `REJECTED`
+   * `APPROVED` &rarr; `COMPLETED`
+   * Final statuses (`REJECTED`, `COMPLETED`) are locked and cannot transition. Violations throw `INVALID_STATUS_TRANSITION` (409).
+2. **Approval Resolution**:
+   A status cannot become `APPROVED` without a resolution (`REFUND`, `REPLACEMENT`, `STORE_CREDIT`). If resolution is `REFUND`, `refundAmount > 0` is required. For others, `refundAmount` must be null. Violations throw `RESOLUTION_REQUIRED` or `INVALID_REFUND_AMOUNT` (400).
+3. **One Live Request Per Item**:
+   A customer cannot have multiple active (non-decided, non-deleted) requests for the same `orderNumber` + `itemSku`. Enforced through transaction checks and a PostgreSQL partial unique index. Violations throw `DUPLICATE_LIVE_REQUEST` (409).
+4. **Metadata Locking**:
+   Once a request reaches a decided status (`APPROVED`, `REJECTED`, `COMPLETED`), its core metadata (customer details, item details, quantity, reason) is locked and cannot be edited. Note additions are still allowed. Violations throw `REQUEST_LOCKED` (409).
+5. **Soft Deletion**:
+   `DELETE` does not physically purge the database row; it sets `removedAt = NOW()`. Only requests in `OPEN` or `REJECTED` status can be soft-deleted. Attempting to soft-delete `IN_REVIEW`, `APPROVED`, or `COMPLETED` requests throws `INVALID_REMOVAL_STATUS` (409).
+
+---
+
+## Architecture Flow
 
 ```text
-┌──────────────────────────┐
-│       React UI           │
-│   Next.js App Router     │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│   Next.js API Routes     │
-│     Route Handlers       │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│   Validation + Business  │
-│        Rules             │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│        Prisma            │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│       PostgreSQL         │
-└──────────────────────────┘
-```
-
-The frontend is not treated as the source of truth for business rules. All important workflow rules are validated on the server so that direct API requests cannot bypass them.
-
----
-
-## Project Structure
-
-```text
-returndesk/
-├── app/
-│   ├── page.tsx
-│   ├── requests/
-│   │   ├── page.tsx
-│   │   ├── new/
-│   │   │   └── page.tsx
-│   │   └── [id]/
-│   │       └── page.tsx
-│   │
-│   └── api/
-│       └── requests/
-│           ├── route.ts
-│           └── [id]/
-│               ├── route.ts
-│               ├── notes/
-│               │   └── route.ts
-│               └── status/
-│                   └── route.ts
-│
-├── components/
-│   ├── requests/
-│   │   ├── RequestTable.tsx
-│   │   ├── RequestFilters.tsx
-│   │   ├── RequestStatusBadge.tsx
-│   │   ├── RequestForm.tsx
-│   │   ├── RequestActions.tsx
-│   │   ├── RequestDetails.tsx
-│   │   ├── NotesTimeline.tsx
-│   │   └── ApprovalDialog.tsx
-│   └── ui/
-│
-├── lib/
-│   ├── prisma.ts
-│   ├── validation.ts
-│   ├── errors.ts
-│   └── business-rules/
-│       ├── status.ts
-│       ├── approval.ts
-│       ├── duplicate.ts
-│       ├── locking.ts
-│       └── removal.ts
-│
-├── prisma/
-│   ├── schema.prisma
-│   └── seed.ts
-│
-├── tests/
-│
-├── .env.example
-├── IMPLEMENTATION_PLAN.md
-├── README.md
-└── package.json
+       [ Next.js App Router (React) ]
+                     │
+                     ▼ (Client Fetch / Server Actions)
+      [ Route Handlers (app/api/) ]
+                     │
+                     ▼ (Validations & Errors)
+   [ Central Business Rules (lib/business-rules/) ]
+                     │
+                     ▼ (ORM)
+            [ Prisma Client ]
+                     │
+                     ▼ (Database Engine)
+             [ PostgreSQL ]
 ```
 
 ---
 
+<<<<<<< HEAD
 # Getting Started
 
 ## Prerequisites
@@ -753,12 +723,63 @@ The test suite verifies:
 
 Run tests with:
 
+=======
+## Database Design
+
+### ReturnRequest
+* `id` (String, Primary Key, UUID)
+* `reference` (String, Unique, Indexed)
+* `customerName` (String)
+* `customerEmail` (String, Indexed)
+* `customerPhone` (String, Optional)
+* `orderNumber` (String, Indexed)
+* `itemName` (String)
+* `itemSku` (String)
+* `quantity` (Int)
+* `reason` (Enum Reason, Indexed)
+* `status` (Enum Status, Indexed)
+* `resolution` (Enum Resolution, Optional)
+* `refundAmount` (Decimal, Optional)
+* `removedAt` (DateTime, Optional)
+* `createdAt` (DateTime, Default now(), Indexed)
+* `updatedAt` (DateTime, Auto update)
+
+### Note
+* `id` (String, Primary Key, UUID)
+* `requestId` (String, Foreign Key, Cascade)
+* `content` (String)
+* `createdAt` (DateTime, Default now(), Indexed)
+
+---
+
+## Design Decisions
+
+1. **PostgreSQL**: Selected for strict ACID transactions, complex query capabilities, and powerful indexing.
+2. **Prisma ORM**: Offers type-safe queries, auto-generated TypeScript models, and easy schema migrations.
+3. **Zod Validation**: Used on both frontend and backend for strong schema runtime type validations.
+4. **Soft Deletion**: Keeps history log audit trails intact while preventing deleted entries from showing in views.
+5. **PostgreSQL Sequence & Partial Unique Index**: Prevents reference collisions and guarantees race-safe live request checks at the database layer.
+
+---
+
+## Assumptions Made
+
+1. **Phone Number**: Optional field for ease of submission, while customer email and name are strictly required.
+2. **Global Sequence**: A single sequence is used to track references across multiple years, ensuring collision-free numbering.
+
+---
+
+## Testing Commands
+
+Run the Vitest test suite to verify all business rules:
+>>>>>>> da406b3 (Phase 2 Frontend, UX, Testing & Deployment)
 ```bash
 npm test
 ```
 
 ---
 
+<<<<<<< HEAD
 # Development Commands
 
 Install dependencies:
@@ -971,3 +992,27 @@ The implementation prioritizes:
 # Time Spent
 
 Approximately **[X hours]**.
+=======
+## Deployment Configuration
+
+For deploying to production (e.g. Vercel + Neon PostgreSQL):
+1. Configure `DATABASE_URL` in environment configuration variables.
+2. Run migrations automatically during build step in Vercel:
+   ```bash
+   npx prisma db push --accept-data-loss
+   ```
+
+---
+
+## Incomplete Features
+
+None. All Phase 1 and Phase 2 functionalities are complete and fully tested.
+
+---
+
+## Time Spent
+
+* **Phase 1 (Database, APIs, Business Rules, Tests)**: ~2 hours
+* **Phase 2 (Tailwind Setup, Components, Pages, Responsive Integration)**: ~2 hours
+* **Total Time Spent**: **4 hours**
+>>>>>>> da406b3 (Phase 2 Frontend, UX, Testing & Deployment)

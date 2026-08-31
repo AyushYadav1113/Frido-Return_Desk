@@ -1,10 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
+model ReturnRequest {
+  id            String      @id @default(uuid())
+  reference     String      @unique
+  customerName  String
+  customerEmail String
+  customerPhone String?
+  orderNumber   String
+  itemName      String
+  itemSku       String
+  quantity      Int
+  reason        Reason
+  status        Status      @default(OPEN)
+  resolution    Resolution?
+  refundAmount  Decimal?    @db.Decimal(10, 2)
+  removedAt     DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  notes         Note[]
+
+  @@index([status])
+  @@index([reason])
+  @@index([orderNumber])
+  @@index([customerEmail])
+  @@index([reference])
+  @@index([createdAt])
+}
+
+model Note {
+  id            String        @id @default(uuid())
+  requestId     String
+  content       String
+  createdAt     DateTime      @default(now())
+  returnRequest ReturnRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
 }
 
 enum Status {
@@ -27,41 +64,4 @@ enum Resolution {
   REFUND
   REPLACEMENT
   STORE_CREDIT
-}
-
-model ReturnRequest {
-  id             String      @id @default(uuid())
-  reference      String      @unique
-  customerName   String
-  customerEmail  String
-  customerPhone  String?
-  orderNumber    String
-  itemName       String
-  itemSku        String
-  quantity       Int
-  reason         Reason
-  status         Status      @default(OPEN)
-  resolution     Resolution?
-  refundAmount   Decimal?    @db.Decimal(10, 2)
-  removedAt      DateTime?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  notes          Note[]
-
-  @@index([status])
-  @@index([reason])
-  @@index([orderNumber])
-  @@index([customerEmail])
-  @@index([reference])
-  @@index([createdAt])
-}
-
-model Note {
-  id            String        @id @default(uuid())
-  requestId     String
-  content       String
-  createdAt     DateTime      @default(now())
-  returnRequest ReturnRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-
-  @@index([requestId, createdAt])
 }
