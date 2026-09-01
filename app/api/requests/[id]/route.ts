@@ -5,6 +5,7 @@ import { UpdateRequestSchema } from '@/lib/validation';
 import { validateLocking } from '@/lib/business-rules/locking';
 import { validateRemoval } from '@/lib/business-rules/removal';
 import { checkDuplicateRequest } from '@/lib/business-rules/duplicate';
+import { createActivity } from '@/lib/activities';
 import { Prisma } from '@prisma/client';
 
 // Helper to fetch request and return 404 if not found or soft-deleted
@@ -13,6 +14,11 @@ async function getActiveRequest(id: string) {
     where: { id },
     include: {
       notes: {
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+      activities: {
         orderBy: {
           createdAt: 'asc',
         },
@@ -73,12 +79,47 @@ export async function PATCH(
         await checkDuplicateRequest(tx, orderNumber, itemSku, current.id);
       }
 
-      // 4. Perform update
+      // 4. Determine changed fields for activity logging
+      const changedFields: string[] = [];
+      const editableKeys = [
+        'customerName',
+        'customerEmail',
+        'customerPhone',
+        'orderNumber',
+        'itemName',
+        'itemSku',
+        'quantity',
+        'reason',
+      ] as const;
+
+      for (const key of editableKeys) {
+        if (key in validatedData && validatedData[key] !== undefined && validatedData[key] !== current[key]) {
+          changedFields.push(key);
+        }
+      }
+
+      if (changedFields.length > 0) {
+        await createActivity(tx, {
+          requestId: params.id,
+          type: 'REQUEST_UPDATED',
+          description: 'Request details updated',
+          metadata: {
+            fields: changedFields,
+          },
+        });
+      }
+
+      // 5. Perform update
       return tx.returnRequest.update({
         where: { id: params.id },
         data: validatedData,
         include: {
           notes: {
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          activities: {
             orderBy: {
               createdAt: 'asc',
             },
@@ -118,17 +159,38 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const returnRequest = await getActiveRequest(params.id);
+    const updated = await prisma.$transaction(async (tx) => {
+      const returnRequest = await tx.returnRequest.findUnique({
+        where: { id: params.id },
+      });
 
-    // Validate removal rules
-    validateRemoval(returnRequest.status);
+      if (!returnRequest || returnRequest.removedAt !== null) {
+        throw new AppError('NOT_FOUND', 'Return request not found.', 404);
+      }
 
-    // Soft delete request
-    const updated = await prisma.returnRequest.update({
-      where: { id: params.id },
-      data: {
-        removedAt: new Date(),
-      },
+      // Validate removal rules
+      validateRemoval(returnRequest.status);
+
+      // Soft delete request
+      const res = await tx.returnRequest.update({
+        where: { id: params.id },
+        data: {
+          removedAt: new Date(),
+        },
+      });
+
+      // Record removal activity
+      await createActivity(tx, {
+        requestId: params.id,
+        type: 'REQUEST_REMOVED',
+        description: 'Request removed from desk',
+        metadata: {
+          status: returnRequest.status,
+          removedAt: res.removedAt?.toISOString(),
+        },
+      });
+
+      return res;
     });
 
     return NextResponse.json({
@@ -140,3 +202,4 @@ export async function DELETE(
     return handleAppError(error);
   }
 }
+

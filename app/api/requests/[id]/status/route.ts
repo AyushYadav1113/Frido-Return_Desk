@@ -4,6 +4,11 @@ import { handleAppError, AppError } from '@/lib/errors';
 import { UpdateStatusSchema } from '@/lib/validation';
 import { validateStatusTransition } from '@/lib/business-rules/status';
 import { validateApproval } from '@/lib/business-rules/approval';
+import {
+  createActivity,
+  formatStatusChangeDescription,
+  formatResolutionDescription,
+} from '@/lib/activities';
 import { Status, Resolution } from '@prisma/client';
 
 export async function POST(
@@ -34,7 +39,37 @@ export async function POST(
         validatedData.refundAmount
       );
 
-      // 4. Update the request status, resolution, and refundAmount
+      // 4. Record activities
+      if (validatedData.status === 'APPROVED' && resolution) {
+        // Record resolution activity first
+        await createActivity(tx, {
+          requestId: params.id,
+          type: 'RESOLUTION_SET',
+          description: formatResolutionDescription(resolution, refundAmount),
+          metadata: {
+            resolution,
+            ...(resolution === 'REFUND' && refundAmount
+              ? { refundAmount: Number(refundAmount) }
+              : {}),
+          },
+        });
+      }
+
+      // Record status transition activity
+      await createActivity(tx, {
+        requestId: params.id,
+        type: 'STATUS_CHANGED',
+        description: formatStatusChangeDescription(
+          current.status,
+          validatedData.status as Status
+        ),
+        metadata: {
+          from: current.status,
+          to: validatedData.status,
+        },
+      });
+
+      // 5. Update the request status, resolution, and refundAmount
       return tx.returnRequest.update({
         where: { id: params.id },
         data: {
@@ -48,6 +83,11 @@ export async function POST(
               createdAt: 'asc',
             },
           },
+          activities: {
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
         },
       });
     });
@@ -57,3 +97,4 @@ export async function POST(
     return handleAppError(error);
   }
 }
+

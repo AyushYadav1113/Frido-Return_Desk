@@ -4,6 +4,7 @@ import { handleAppError, AppError } from '@/lib/errors';
 import { GetRequestsSchema, CreateRequestSchema } from '@/lib/validation';
 import { generateReference } from '@/lib/reference';
 import { checkDuplicateRequest } from '@/lib/business-rules/duplicate';
+import { createActivity } from '@/lib/activities';
 import { Prisma, Status, Reason } from '@prisma/client';
 
 export async function GET(request: NextRequest) {
@@ -57,6 +58,11 @@ export async function GET(request: NextRequest) {
             createdAt: 'asc',
           },
         },
+        activities: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+        },
       },
     });
     
@@ -87,11 +93,43 @@ export async function POST(request: NextRequest) {
       const reference = await generateReference(tx);
       
       // Create request
-      return tx.returnRequest.create({
+      const newRequest = await tx.returnRequest.create({
         data: {
           ...validatedData,
           reference,
           status: 'OPEN',
+        },
+        include: {
+          notes: true,
+          activities: true,
+        },
+      });
+
+      // Create REQUEST_CREATED activity
+      await createActivity(tx, {
+        requestId: newRequest.id,
+        type: 'REQUEST_CREATED',
+        description: 'Request created',
+        metadata: {
+          reference: newRequest.reference,
+          orderNumber: newRequest.orderNumber,
+          itemSku: newRequest.itemSku,
+        },
+      });
+
+      return tx.returnRequest.findUnique({
+        where: { id: newRequest.id },
+        include: {
+          notes: {
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          activities: {
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
         },
       });
     });

@@ -171,6 +171,16 @@ Notes are:
 
 ---
 
+## Activity Timeline
+
+ReturnDesk records important request lifecycle events in an immutable activity timeline. Activities are generated server-side and are created in the same database transaction as the operation that caused them.
+
+Notes and system activities are intentionally kept separate: notes represent agent-written commentary, while activities represent system events.
+
+Activities are immutable and cannot be edited or deleted through the API.
+
+---
+
 ## API
 
 The application provides API endpoints for the main request actions.
