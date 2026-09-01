@@ -1,10 +1,11 @@
-import { PrismaClient, Status, Reason, Resolution } from '@prisma/client';
+import { PrismaClient, Status, Reason, Resolution, ActivityType } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('Clearing existing data...');
 
+  await prisma.activity.deleteMany({});
   await prisma.note.deleteMany({});
   await prisma.returnRequest.deleteMany({});
 
@@ -14,7 +15,6 @@ async function main() {
   } catch (err) {
     console.log('Sequence does not exist yet. It will be created by migrations/index setup.');
   }
-
 
   const statuses: Status[] = [
     'OPEN',
@@ -71,7 +71,7 @@ async function main() {
     'Tricia McMillan',
   ];
 
-  console.log('Seeding 30 requests...');
+  console.log('Seeding 30 requests with activity timelines...');
 
   for (let i = 0; i < 30; i++) {
     const status = statuses[Math.floor(i / 6)];
@@ -92,7 +92,126 @@ async function main() {
     const refNum = (i + 1).toString().padStart(5, '0');
     const reference = `RET-${year}-${refNum}`;
 
-    const request = await prisma.returnRequest.create({
+    const baseTime = Date.now() - 3600000 * 24 * (30 - i);
+    const createdAt = new Date(baseTime);
+
+    const notesData: { content: string; createdAt: Date }[] = [];
+    const activitiesData: {
+      type: ActivityType;
+      description: string;
+      metadata?: any;
+      createdAt: Date;
+    }[] = [];
+
+    // 1. Initial Request Created Activity
+    activitiesData.push({
+      type: 'REQUEST_CREATED',
+      description: 'Request created',
+      metadata: {
+        reference,
+        orderNumber: `ORD-${1000 + i}`,
+        itemSku: `SKU-${100 + i}`,
+      },
+      createdAt,
+    });
+
+    // 2. Status change to IN_REVIEW for non-OPEN requests
+    if (status !== 'OPEN') {
+      activitiesData.push({
+        type: 'STATUS_CHANGED',
+        description: 'Status changed from Open to In Review',
+        metadata: {
+          from: 'OPEN',
+          to: 'IN_REVIEW',
+        },
+        createdAt: new Date(baseTime + 3600000), // +1 hour
+      });
+    }
+
+    // 3. Notes and NOTE_ADDED activity
+    if (i % 2 === 0) {
+      const noteTime = new Date(baseTime + 3600000 * 2);
+      notesData.push({
+        content: `Initial return request created by customer for ${reason
+          .toLowerCase()
+          .replace('_', ' ')}.`,
+        createdAt: noteTime,
+      });
+
+      activitiesData.push({
+        type: 'NOTE_ADDED',
+        description: 'Note added',
+        createdAt: noteTime,
+      });
+    }
+
+    if (i % 3 === 0) {
+      const noteTime = new Date(baseTime + 3600000 * 3);
+      notesData.push({
+        content: `Support team followed up: waiting on confirmation.`,
+        createdAt: noteTime,
+      });
+
+      activitiesData.push({
+        type: 'NOTE_ADDED',
+        description: 'Note added',
+        createdAt: noteTime,
+      });
+    }
+
+    // 4. Decision transitions (APPROVED, REJECTED, COMPLETED)
+    if (status === 'APPROVED' || status === 'COMPLETED') {
+      const resDesc =
+        resolution === 'REFUND' && refundAmount
+          ? `Resolution set to Refund for $${refundAmount.toFixed(2)}`
+          : `Resolution set to ${resolution === 'REPLACEMENT' ? 'Replacement' : 'Store Credit'}`;
+
+      activitiesData.push({
+        type: 'RESOLUTION_SET',
+        description: resDesc,
+        metadata: {
+          resolution,
+          ...(resolution === 'REFUND' && refundAmount ? { refundAmount } : {}),
+        },
+        createdAt: new Date(baseTime + 3600000 * 4),
+      });
+
+      activitiesData.push({
+        type: 'STATUS_CHANGED',
+        description: 'Status changed from In Review to Approved',
+        metadata: {
+          from: 'IN_REVIEW',
+          to: 'APPROVED',
+        },
+        createdAt: new Date(baseTime + 3600000 * 4 + 60000), // +4h 1m
+      });
+    }
+
+    if (status === 'REJECTED') {
+      activitiesData.push({
+        type: 'STATUS_CHANGED',
+        description: 'Status changed from In Review to Rejected',
+        metadata: {
+          from: 'IN_REVIEW',
+          to: 'REJECTED',
+        },
+        createdAt: new Date(baseTime + 3600000 * 4),
+      });
+    }
+
+    if (status === 'COMPLETED') {
+      activitiesData.push({
+        type: 'STATUS_CHANGED',
+        description: 'Status changed from Approved to Completed',
+        metadata: {
+          from: 'APPROVED',
+          to: 'COMPLETED',
+        },
+        createdAt: new Date(baseTime + 3600000 * 5),
+      });
+    }
+
+    await prisma.returnRequest.create({
       data: {
         reference,
         customerName: customerNames[i],
@@ -108,30 +227,15 @@ async function main() {
         status,
         resolution,
         refundAmount,
+        createdAt,
+        notes: {
+          create: notesData,
+        },
+        activities: {
+          create: activitiesData,
+        },
       },
     });
-
-    if (i % 2 === 0) {
-      await prisma.note.create({
-        data: {
-          requestId: request.id,
-          content: `Initial return request created by customer for ${reason
-            .toLowerCase()
-            .replace('_', ' ')}.`,
-          createdAt: new Date(Date.now() - 3600000 * 2),
-        },
-      });
-    }
-
-    if (i % 3 === 0) {
-      await prisma.note.create({
-        data: {
-          requestId: request.id,
-          content: `Support team followed up: waiting on confirmation.`,
-          createdAt: new Date(Date.now() - 3600000),
-        },
-      });
-    }
   }
 
   // Set the sequence to 31 so new requests generated begin from 31
@@ -143,7 +247,6 @@ async function main() {
 
   console.log('Seed completed successfully!');
 }
-
 
 main()
   .catch((e) => {
