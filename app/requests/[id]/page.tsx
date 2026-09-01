@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import RequestStatusBadge from '@/components/requests/RequestStatusBadge';
 import RequestActions from '@/components/requests/RequestActions';
 import NotesTimeline from '@/components/requests/NotesTimeline';
+import ActivityTimeline from '@/components/requests/ActivityTimeline';
 import { ArrowLeft, Loader2, Calendar, User, Package, ShieldCheck, AlertCircle } from 'lucide-react';
 
 interface RequestDetailsProps {
@@ -66,12 +67,8 @@ export default function RequestDetailsPage({ params }: RequestDetailsProps) {
   };
 
   const handleAddNote = (newNote: any) => {
-    if (request) {
-      setRequest({
-        ...request,
-        notes: [...request.notes, newNote],
-      });
-    }
+    // Re-fetch request details so both notes and the newly recorded NOTE_ADDED activity are in sync
+    fetchRequestDetails();
   };
 
   const formatDate = (dateStr: string) => {
@@ -216,6 +213,10 @@ export default function RequestDetailsPage({ params }: RequestDetailsProps) {
             )}
           </div>
 
+          {/* Activity / Audit Timeline */}
+          <ActivityTimeline activities={request.activities || []} />
+
+          {/* Notes Section */}
           <NotesTimeline
             requestId={request.id}
             notes={request.notes || []}
